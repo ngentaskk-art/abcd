@@ -27,16 +27,27 @@ BOT_TOKEN = os.getenv("BOT_TOKEN")
 PROXYCHECK_KEY = os.getenv("PROXYCHECK_KEY")
 IP2LOCATION_KEY = os.getenv("IP2LOCATION_KEY")
 
-# Второй бот — только для пересылки логов активности в лог-чат/группу
 LOG_BOT_TOKEN = os.getenv("LOG_BOT_TOKEN")
 LOG_CHAT_ID = os.getenv("LOG_CHAT_ID")
 
-BLOCKED_USER_IDS: set[int] = {
-}
 
-ADMIN_IDS: set[int] = {
-    529749792
-}
+def _parse_id_set(env_value: Optional[str]) -> set[int]:
+    if not env_value:
+        return set()
+    result = set()
+    for part in env_value.split(","):
+        part = part.strip()
+        if not part:
+            continue
+        if not part.lstrip("-").isdigit():
+            log.warning("Некорректный ID в переменной окружения: %r — пропущен", part)
+            continue
+        result.add(int(part))
+    return result
+
+
+ADMIN_IDS: set[int] = _parse_id_set(os.getenv("ADMIN_IDS"))
+BLOCKED_USER_IDS: set[int] = _parse_id_set(os.getenv("BLOCKED_USER_IDS"))
 DNS_TIMEOUT = 5
 HTTP_TIMEOUT = 10
 CACHE_TTL = 15 * 60
