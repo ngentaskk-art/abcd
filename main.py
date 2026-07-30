@@ -6,13 +6,13 @@ import math
 import os
 import socket
 import time
-from typing import Optional
+from typing import Any, Awaitable, Callable, Dict, Optional
 
 import aiohttp
-from aiogram import Bot, Dispatcher
+from aiogram import BaseMiddleware, Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 from aiogram.filters import Command, CommandStart
-from aiogram.types import ErrorEvent, Message
+from aiogram.types import ErrorEvent, Message, TelegramObject
 
 
 
@@ -31,6 +31,12 @@ IP2LOCATION_KEY = os.getenv("IP2LOCATION_KEY")
 LOG_BOT_TOKEN = os.getenv("LOG_BOT_TOKEN")
 LOG_CHAT_ID = os.getenv("LOG_CHAT_ID")
 
+BLOCKED_USER_IDS: set[int] = {
+}
+
+ADMIN_IDS: set[int] = {
+    529749792
+}
 DNS_TIMEOUT = 5
 HTTP_TIMEOUT = 10
 CACHE_TTL = 15 * 60
@@ -39,6 +45,63 @@ RATE_LIMIT_SECONDS = 3
 bot = Bot(BOT_TOKEN, default=DefaultBotProperties(parse_mode="HTML"))
 dp = Dispatcher()
 
+class BlockedUsersMiddleware(BaseMiddleware):
+    async def __call__(
+            self,
+            handler: Callable[[TelegramObject, Dict[str, Any]], Awaitable[Any]],
+            event: TelegramObject,
+            data: Dict[str, Any],
+    ) -> Any:
+        user = data.get("event_from_user")
+        if user and user.id in BLOCKED_USER_IDS:
+            if isinstance(event, Message):
+                await event.answer("ne")
+            return
+        return await handler(event, data)
+
+def is_admin(user_id: int) -> bool:
+    return user_id in ADMIN_IDS
+
+@dp.message(Command("ban"))
+async def block_cmd(message: Message):
+    if not is_admin(message.from_user.id):
+        return
+
+    parts = message.text.split()
+    if len(parts) != 2 or not parts[1].isdigit():
+        await message.answer("❌ Использование: <code>/ban user_id</code>")
+        return
+
+    target_id = int(parts[1])
+    BLOCKED_USER_IDS.add(target_id)
+    await message.answer(f"✅ Пользователь <code>{target_id}</code> добавлен в блок-лист.")
+
+@dp.message(Command("unban"))
+async def unblock_cmd(message: Message):
+    if not is_admin(message.from_user.id):
+        return
+
+    parts = message.text.split()
+    if len(parts) != 2 or not parts[1].isdigit():
+        await message.answer("❌ Использование: <code>/unban user_id</code>")
+        return
+
+    target_id = int(parts[1])
+    BLOCKED_USER_IDS.discard(target_id)
+    await message.answer(f"✅ Пользователь <code>{target_id}</code> удалён из блок-листа.")
+
+
+@dp.message(Command("banlist"))
+async def blocklist_cmd(message: Message):
+    if not is_admin(message.from_user.id):
+        return
+
+    if not BLOCKED_USER_IDS:
+        await message.answer("Блок-лист пуст.")
+        return
+
+    ids_text = "\n".join(f"• <code>{uid}</code>" for uid in sorted(BLOCKED_USER_IDS))
+    await message.answer(f"🚫 Заблокированные ID:\n{ids_text}")
 
 _cache: dict[str, tuple[float, dict]] = {}
 
