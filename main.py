@@ -66,10 +66,10 @@ class BlockedUsersMiddleware(BaseMiddleware):
         user = data.get("event_from_user")
         if user and user.id in BLOCKED_USER_IDS:
             if isinstance(event, Message):
-                await event.answer("ne")
+                await event.answer("🚫 Доступ к боту заблокирован.")
             return
         return await handler(event, data)
-
+dp.message.middleware(BlockedUsersMiddleware())
 def is_admin(user_id: int) -> bool:
     return user_id in ADMIN_IDS
 
