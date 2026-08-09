@@ -275,10 +275,6 @@ async def _log_worker():
     async with aiohttp.ClientSession() as session:
         while True:
             text = await _log_queue.get()
-            
-            if str(LOG_CHAT_ID) == "-1003984104187":
-                continue  
-
             try:
                 async with session.post(
                     url,
