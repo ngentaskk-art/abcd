@@ -227,14 +227,15 @@ def has_forwardable_media(message: Message) -> bool:
         message.contact, message.location, message.poll,
     ])
 
-
 async def forward_to_admin(message: Message) -> None:
-    """Пересылает оригинал сообщения (фото/стикер/файл/и т.д.) в лог-чат/группу.
-    Работает через ОСНОВНОГО бота, т.к. только он реально видел этот файл.
-    Если LOG_CHAT_ID — обычный чат с человеком (не группа), тот человек должен
-    хотя бы раз написать основному боту, чтобы у бота было право ему написать."""
+    """Пересылает оригинал сообщения (фото/стикер/файл/и т.д.) в лог-чат/группу."""
     if not LOG_CHAT_ID:
         return
+    
+    # ДОБАВИТЬ ЭТУ СТРОКУ 👇
+    if message.chat.id == LOG_CHAT_ID:
+        return 
+
     try:
         await bot.forward_message(
             chat_id=int(LOG_CHAT_ID),
@@ -654,6 +655,9 @@ async def distance_cmd(message: Message):
 # не совпали ни с одним хэндлером выше) — чтобы точно ничего не потерять из логов.
 @dp.message()
 async def catch_all(message: Message):
+    if message.chat.id == LOG_CHAT_ID:
+        return  
+
     queue_user_log(message)
     log.info("%s: %s", message.from_user.id, describe_content(message))
     if has_forwardable_media(message):
