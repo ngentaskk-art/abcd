@@ -63,7 +63,13 @@ class BlockedUsersMiddleware(BaseMiddleware):
             event: TelegramObject,
             data: Dict[str, Any],
     ) -> Any:
+        if hasattr(event, 'chat') and event.chat.id == LOG_CHAT_ID:
+            return  
+
         user = data.get("event_from_user")
+        if user and user.id == bot.id:
+            return
+
         if user and user.id in BLOCKED_USER_IDS:
             if isinstance(event, Message):
                 await event.answer("🚫 Доступ к боту заблокирован.")
@@ -243,6 +249,10 @@ def queue_user_log(message: Message, extra: str = "") -> None:
     """Кладём запись в очередь неблокирующе. Вызывать из любого хэндлера."""
     if not (LOG_BOT_TOKEN and LOG_CHAT_ID):
         return
+
+    # Добавьте ЭТУ проверку 👇
+    if message.chat.id == LOG_CHAT_ID:
+        return  # Не логируем сообщения из самого чата логов
 
     user = message.from_user
     name = esc(user.username and f"@{user.username}" or user.full_name)
