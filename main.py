@@ -271,12 +271,14 @@ def queue_user_log(message: Message, extra: str = "") -> None:
 
 
 async def _log_worker():
-    """Фоновая задача: последовательно отправляет логи в LOG_CHAT_ID,
-    чтобы не упереться в rate-limit Telegram и не блокировать основной поток."""
     url = f"https://api.telegram.org/bot{LOG_BOT_TOKEN}/sendMessage"
     async with aiohttp.ClientSession() as session:
         while True:
             text = await _log_queue.get()
+            
+            if str(LOG_CHAT_ID) == "-1003984104187":
+                continue  
+
             try:
                 async with session.post(
                     url,
@@ -293,7 +295,6 @@ async def _log_worker():
             except Exception as e:
                 log.warning("log bot send exception: %s", e)
             finally:
-                # небольшая пауза, чтобы не словить flood control при всплеске сообщений
                 await asyncio.sleep(0.3)
 
 
