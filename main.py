@@ -28,7 +28,6 @@ PROXYCHECK_KEY = os.getenv("PROXYCHECK_KEY")
 IP2LOCATION_KEY = os.getenv("IP2LOCATION_KEY")
 
 LOG_BOT_TOKEN = os.getenv("LOG_BOT_TOKEN")
-LOG_CHAT_ID = os.getenv("LOG_CHAT_ID")
 
 
 def _parse_id_set(env_value: Optional[str]) -> set[int]:
@@ -46,12 +45,35 @@ def _parse_id_set(env_value: Optional[str]) -> set[int]:
     return result
 
 
+def _parse_optional_int(env_value: Optional[str]) -> Optional[int]:
+    """Безопасно приводит переменную окружения к int.
+
+    Раньше LOG_CHAT_ID хранился как str, из-за чего сравнения вида
+    `message.chat.id == LOG_CHAT_ID` (int == str) были ВСЕГДА False,
+    и весь код, защищающий от повторного логирования/форварда
+    сообщений из самого лог-чата, фактически не работал.
+    """
+    if not env_value:
+        return None
+    try:
+        return int(env_value)
+    except ValueError:
+        log.warning("LOG_CHAT_ID некорректен: %r — логирование в чат отключено", env_value)
+        return None
+
+
 ADMIN_IDS: set[int] = _parse_id_set(os.getenv("ADMIN_IDS"))
 BLOCKED_USER_IDS: set[int] = _parse_id_set(os.getenv("BLOCKED_USER_IDS"))
+LOG_CHAT_ID: Optional[int] = _parse_optional_int(os.getenv("LOG_CHAT_ID"))
+
 DNS_TIMEOUT = 5
 HTTP_TIMEOUT = 10
 CACHE_TTL = 15 * 60
 RATE_LIMIT_SECONDS = 3
+
+# Команды другого бота (LogsBot на Java), которые не должны попадать
+# в лог-чат / пересылаться дальше, чтобы не создавать циклы дублей.
+IGNORED_COMMAND_PREFIXES = ("!логи", "!бан", "!unban")
 
 bot = Bot(BOT_TOKEN, default=DefaultBotProperties(parse_mode="HTML"))
 dp = Dispatcher()
@@ -180,6 +202,15 @@ def esc(value) -> str:
     return html.escape(str(value))
 
 
+def is_ignored_command(message: Message) -> bool:
+    """True, если сообщение — это команда другого (Java) бота логов/бана,
+    которую не нужно логировать/пересылать в лог-чат."""
+    text = message.text or message.caption
+    if not text:
+        return False
+    return text.strip().startswith(IGNORED_COMMAND_PREFIXES)
+
+
 # ---------------------------------------------------------------------------
 # Логирование активности пользователей во второй чат через отдельного бота
 # ---------------------------------------------------------------------------
@@ -231,14 +262,16 @@ async def forward_to_admin(message: Message) -> None:
     """Пересылает оригинал сообщения (фото/стикер/файл/и т.д.) в лог-чат/группу."""
     if not LOG_CHAT_ID:
         return
-    
-    # ДОБАВИТЬ ЭТУ СТРОКУ 👇
+
     if message.chat.id == LOG_CHAT_ID:
-        return 
+        return
+
+    if is_ignored_command(message):
+        return
 
     try:
         await bot.forward_message(
-            chat_id=int(LOG_CHAT_ID),
+            chat_id=LOG_CHAT_ID,
             from_chat_id=message.chat.id,
             message_id=message.message_id,
         )
@@ -251,9 +284,11 @@ def queue_user_log(message: Message, extra: str = "") -> None:
     if not (LOG_BOT_TOKEN and LOG_CHAT_ID):
         return
 
-    # Добавьте ЭТУ проверку 👇
     if message.chat.id == LOG_CHAT_ID:
         return  # Не логируем сообщения из самого чата логов
+
+    if is_ignored_command(message):
+        return  # Не логируем команды другого бота (!логи/!бан/!unban)
 
     user = message.from_user
     name = esc(user.username and f"@{user.username}" or user.full_name)
@@ -653,7 +688,10 @@ async def distance_cmd(message: Message):
 @dp.message()
 async def catch_all(message: Message):
     if message.chat.id == LOG_CHAT_ID:
-        return  
+        return
+
+    if is_ignored_command(message):
+        return
 
     queue_user_log(message)
     log.info("%s: %s", message.from_user.id, describe_content(message))
