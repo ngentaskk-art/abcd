@@ -71,6 +71,9 @@ HTTP_TIMEOUT = 10
 CACHE_TTL = 15 * 60
 RATE_LIMIT_SECONDS = 3
 
+# Максимум IP-адресов, которые можно прислать одним сообщением через пробел.
+MAX_IPS_PER_MESSAGE = 20
+
 # Команды другого бота (LogsBot на Java), которые не должны попадать
 # в лог-чат / пересылаться дальше, чтобы не создавать циклы дублей.
 IGNORED_COMMAND_PREFIXES = ("!логи", "!бан", "!unban")
@@ -596,9 +599,36 @@ async def start(message: Message):
     await message.answer(
         "📡 <b>IP Analyzer</b>\n\n"
         "Отправь IP адрес, чтобы получить информацию о нём.\n"
+        "Можно прислать сразу несколько IP через пробел — придёт отдельное "
+        f"сообщение по каждому в том же порядке (максимум {MAX_IPS_PER_MESSAGE} за раз, "
+        "занимает примерно 1-3 сек на каждый IP).\n"
         "Для сравнения используй:\n"
         "<code>/distance ip1 ip2</code>"
     )
+
+
+async def lookup_single_ip(message: Message, ip: str) -> None:
+    """Обрабатывает один IP из присланного списка и шлёт по нему отдельный ответ."""
+    if not is_ip(ip):
+        await message.answer(f"❌ Некорректный IP: <code>{esc(ip)}</code>")
+        return
+
+    if not is_public_ip(ip):
+        await message.answer(f"❌ <code>{esc(ip)}</code> — приватный/зарезервированный IP, по нему нет геоданных")
+        return
+
+    session: aiohttp.ClientSession = dp["session"]
+
+    data = await gather_ip_data(session, ip)
+    if not data:
+        await message.answer(
+            f"❌ Не удалось получить геоданные по <code>{esc(ip)}</code> "
+            f"(сервис недоступен или лимит запросов исчерпан)"
+        )
+        return
+
+    text = format_lookup_text(ip, data["geo"], data["vpn"], data["reverse"], data["connection_type"])
+    await message.answer(text)
 
 
 @dp.message(lambda m: m.text and not m.text.startswith("/") and m.chat.type == "private")
@@ -609,26 +639,29 @@ async def lookup(message: Message):
         await message.answer("⏳ Слишком часто. Подожди пару секунд и попробуй снова.")
         return
 
-    ip = message.text.strip()
-    log.info("%s: %s", message.from_user.id, ip)
+    ips = message.text.split()
 
-    if not is_ip(ip):
+    if not ips:
         await message.answer("❌ Некорректный IP")
         return
 
-    if not is_public_ip(ip):
-        await message.answer("❌ Это приватный/зарезервированный IP — по нему нет геоданных")
+    if len(ips) > MAX_IPS_PER_MESSAGE:
+        await message.answer(
+            f"❌ Слишком много IP за раз (максимум {MAX_IPS_PER_MESSAGE}). Пришли меньше адресов."
+        )
         return
 
-    session: aiohttp.ClientSession = dp["session"]
+    log.info("%s: %s", message.from_user.id, ips)
 
-    data = await gather_ip_data(session, ip)
-    if not data:
-        await message.answer("❌ Не удалось получить геоданные по IP (сервис недоступен или лимит запросов исчерпан)")
+    if len(ips) == 1:
+        await lookup_single_ip(message, ips[0])
         return
 
-    text = format_lookup_text(ip, data["geo"], data["vpn"], data["reverse"], data["connection_type"])
-    await message.answer(text)
+    # Несколько IP в одном сообщении — ставим их в очередь и обрабатываем
+    # строго по одному, в том же порядке, в каком они были присланы.
+    # Так гарантируется, что и ответы придут в том же порядке.
+    for ip in ips:
+        await lookup_single_ip(message, ip)
 
 
 @dp.message(Command("distance"))
